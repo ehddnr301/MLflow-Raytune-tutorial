@@ -17,6 +17,8 @@ SELECT_ALL_INSURANCE = """
 
 POSTGRES_URL = 'postgresql://ehddnr:0000@localhost:5431/ehddnr'
 
+EXP_NAME = 'my_experiment12'
+
 class ETL:
     def __init__(self):
         self.df = None
@@ -94,20 +96,38 @@ class InsuranceTuner(Tuner):
             verbose_eval=False
         )
 
-        params = {
-            "max_depth": config['max_depth'],
-            "min_child_weight": config['min_child_weight'],
-            "subsample": config['subsample'],
-            "eta": config['eta'],
-        }
-        
-        mlflow.log_params(params)
-        mlflow.log_metric('mae', results['eval']['mae'][-1])
-        mlflow.xgboost.log_model(
-            xgb_model=xgb_model,
-            artifact_path=''
-        )
-        tune.report(mean_loss=results['eval']['mae'][-1], done=True)
+        result_mae = results['eval']['mae'][-1] # 실험 결과
+        exp_id = mlflow.get_experiment_by_name(EXP_NAME).experiment_id
+        run_list = mlflow.list_run_infos(exp_id)
+
+        metric_list = []
+        for run in run_list:
+            mae_list = mlflow.tracking.MlflowClient().get_metric_history(run.run_id, 'mae')
+            if len(mae_list) != 0:
+                val = mae_list[0].value
+                metric_list.append(val)
+
+        if len(metric_list) != 0:
+            minimum = min(metric_list)
+        else:
+            minimum = 9999999
+
+        if result_mae <= minimum:
+            params = {
+                "max_depth": config['max_depth'],
+                "min_child_weight": config['min_child_weight'],
+                "subsample": config['subsample'],
+                "eta": config['eta'],
+            }
+            
+            mlflow.log_params(params)
+            mlflow.log_metric('mae', result_mae)
+            mlflow.xgboost.log_model(
+                xgb_model=xgb_model,
+                artifact_path=''
+            )
+            tune.report(mean_loss=result_mae, done=True)
+
 
     def exec(self):
         """
@@ -122,7 +142,7 @@ class InsuranceTuner(Tuner):
 
 if __name__ == '__main__':
     mlflow.set_tracking_uri(POSTGRES_URL)
-    mlflow.set_experiment("my_experiment8")
+    mlflow.set_experiment(EXP_NAME)
 
     etl = ETL()
 
@@ -142,7 +162,7 @@ if __name__ == '__main__':
             "subsample": tune.uniform(0.5, 1.0),
             "eta": tune.loguniform(1e-4, 1e-1),
             "mlflow": {
-                'experiment_name': 'my_experiment8',
+                'experiment_name': EXP_NAME,
                 'tracking_uri': mlflow.get_tracking_uri()
             }
         }
