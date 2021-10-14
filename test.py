@@ -3,6 +3,7 @@ import pandas as pd
 import xgboost as xgb
 import random
 
+from mlflow.tracking import MlflowClient
 from abc import ABC, abstractmethod
 from ray import tune
 from ray.tune.integration.mlflow import MLflowLoggerCallback, mlflow_mixin
@@ -19,6 +20,8 @@ SELECT_ALL_INSURANCE = """
 POSTGRES_URL = 'postgresql://ehddnr:0000@localhost:5431/ehddnr'
 
 EXP_NAME = 'my_experiment143'
+
+METRIC = 'mae'
 
 class ETL:
     def __init__(self):
@@ -77,18 +80,46 @@ class Tuner(ABC):
 
 class InsuranceTuner(Tuner):
 
-    def __init__(self, data_X, data_y, config):
+    def __init__(self, data_X, data_y):
         self.data_X = data_X
         self.data_y = data_y
-        self.config = config
+        self.TUNE_METRIC_DICT = {
+            "mae": "min",
+            "mse": "min",
+            "rmse": "min"
+        }
 
-    @mlflow_mixin
-    def _train_insurance(self, config):
+    def _log_experiments(self, config, metrics, xgb_model):
+        best_score = None
+        mlflow.set_tracking_uri(POSTGRES_URL)
+
+        client = MlflowClient()
+        exp_id = client.get_experiment_by_name(EXP_NAME).experiment_id
+        runs = mlflow.search_runs([exp_id])
+
+        if len(runs) > 0:
+            try:
+                best_score = runs[f'metrics.{METRIC}'].min()
+            except Exception as e:
+                print(e)
+
+        with mlflow.start_run(experiment_id=exp_id):
+            mlflow.log_metrics(metrics)
+            mlflow.log_params(config)
+
+            if not best_score or best_score > metrics[METRIC]:
+                print('log model')
+                mlflow.xgboost.log_model(
+                    xgb_model,
+                    artifact_path="model",
+                )
+
+    def _trainable(self, config):
         train_x, test_x, train_y, test_y = super()._split(0.2)
         train_set = xgb.DMatrix(train_x, label=train_y)
         test_set = xgb.DMatrix(test_x, label=test_y)
-        results = {}
 
+        results = {}
         xgb_model = xgb.train(
             config,
             train_set,
@@ -96,56 +127,37 @@ class InsuranceTuner(Tuner):
             evals_result=results,
             verbose_eval=False
         )
+        return results['eval'], xgb_model
 
-        result_mae = results['eval']['mae'][-1] # 실험 결과
-        exp_id = mlflow.get_experiment_by_name(EXP_NAME).experiment_id
-        run_list = mlflow.list_run_infos(exp_id)
+    def _run(self, config):
+        results, xgb_model = self._trainable(config)
 
-        metric_list = []
-        for run in run_list:
-            mae_list = mlflow.tracking.MlflowClient().get_metric_history(run.run_id, 'mae')
-            if len(mae_list) != 0:
-                val = mae_list[0].value
-                metric_list.append(val)
-
-        params = {
-            "max_depth": config['max_depth'],
-            "min_child_weight": config['min_child_weight'],
-            "subsample": config['subsample'],
-            "eta": config['eta'],
+        metrics = {
+            "mae": min(results["mae"]),
+            "rmse": min(results["rmse"]),
         }
-        
-        if len(metric_list) != 0:
-            minimum = min(metric_list)
-        else:
-            minimum = 9999999
 
-        if result_mae <= minimum:
-            mlflow.xgboost.log_model(
-                xgb_model=xgb_model,
-                artifact_path='',
-            )
+        self._log_experiments(config, metrics, xgb_model)
+        tune.report(**metrics)
 
-        mlflow.log_params(params)
-        mlflow.log_metric('mae', result_mae)
-        tune.report(mean_loss=result_mae, done=True)
+    def exec(self, tune_config=None, num_trials=15):
+        DEFAULT_CONFIG = {
+            "objective": "reg:squarederror",
+            "eval_metric": ["mae", "rmse"],
+            "max_depth": tune.randint(1, 9),
+            "min_child_weight": tune.choice([1, 2, 3]),
+            "subsample": tune.uniform(0.5, 1.0),
+            "eta": tune.loguniform(1e-4, 1e-1),
+        }
 
-
-    def exec(self):
-        """
-        exec method가 실행되면 _train_insurance method를 이용하여 tune.run 실행
-        """
-        mlflow.set_experiment(EXP_NAME)
+        config = tune_config if tune_config else DEFAULT_CONFIG
         tune.run(
-                self._train_insurance,
-                config=self.config,
-                num_samples=10,
-                callbacks=[MLflowLoggerCallback(
-                experiment_name=EXP_NAME,
-                save_artifact=True,
-            )]
-            )
-
+            self._run,
+            config=config,
+            metric=METRIC,
+            mode=self.TUNE_METRIC_DICT[METRIC],
+            num_samples=num_trials,
+        )
 
 if __name__ == '__main__':
     mlflow.set_tracking_uri(POSTGRES_URL)
@@ -160,18 +172,6 @@ if __name__ == '__main__':
 
     it = InsuranceTuner(
         data_X=X,
-        data_y=y,
-        config={
-            "objective": "reg:squarederror",
-            "eval_metric": ["mae", "rmse"],
-            "max_depth": tune.randint(1, 9),
-            "min_child_weight": tune.choice([1, 2, 3]),
-            "subsample": tune.uniform(0.5, 1.0),
-            "eta": tune.loguniform(1e-4, 1e-1),
-            "mlflow": {
-                'experiment_name': EXP_NAME,
-                'tracking_uri': mlflow.get_tracking_uri()
-            }
-        }
+        data_y=y
     )
     it.exec()
