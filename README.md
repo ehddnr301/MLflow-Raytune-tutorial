@@ -13,7 +13,7 @@
 ## mlflow dashboard
 
 - `mlflow server --backend-store-uri postgresql://ehddnr:0000@localhost:5431/ehddnr --default-artifact-root <실험저장 경로>`
-    - `<실험저장경로>` example : `C:\Users\TFG5076XG\Documents\ray_test\mlruns`
+    - `<실험저장경로>` example : `C:\Users\TFG5076XG\Documents\ray_mlflow\mlruns`
 
 ## execute
 

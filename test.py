@@ -1,10 +1,11 @@
 import mlflow
 import pandas as pd
 import xgboost as xgb
+import random
 
 from abc import ABC, abstractmethod
 from ray import tune
-from ray.tune.integration.mlflow import mlflow_mixin
+from ray.tune.integration.mlflow import MLflowLoggerCallback, mlflow_mixin
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 
@@ -17,7 +18,7 @@ SELECT_ALL_INSURANCE = """
 
 POSTGRES_URL = 'postgresql://ehddnr:0000@localhost:5431/ehddnr'
 
-EXP_NAME = 'my_experiment12'
+EXP_NAME = 'my_experiment143'
 
 class ETL:
     def __init__(self):
@@ -107,36 +108,42 @@ class InsuranceTuner(Tuner):
                 val = mae_list[0].value
                 metric_list.append(val)
 
+        params = {
+            "max_depth": config['max_depth'],
+            "min_child_weight": config['min_child_weight'],
+            "subsample": config['subsample'],
+            "eta": config['eta'],
+        }
+        
         if len(metric_list) != 0:
             minimum = min(metric_list)
         else:
             minimum = 9999999
 
         if result_mae <= minimum:
-            params = {
-                "max_depth": config['max_depth'],
-                "min_child_weight": config['min_child_weight'],
-                "subsample": config['subsample'],
-                "eta": config['eta'],
-            }
-            
-            mlflow.log_params(params)
-            mlflow.log_metric('mae', result_mae)
             mlflow.xgboost.log_model(
                 xgb_model=xgb_model,
-                artifact_path=''
+                artifact_path='',
             )
-            tune.report(mean_loss=result_mae, done=True)
+
+        mlflow.log_params(params)
+        mlflow.log_metric('mae', result_mae)
+        tune.report(mean_loss=result_mae, done=True)
 
 
     def exec(self):
         """
         exec method가 실행되면 _train_insurance method를 이용하여 tune.run 실행
         """
+        mlflow.set_experiment(EXP_NAME)
         tune.run(
                 self._train_insurance,
                 config=self.config,
-                num_samples=10
+                num_samples=10,
+                callbacks=[MLflowLoggerCallback(
+                experiment_name=EXP_NAME,
+                save_artifact=True,
+            )]
             )
 
 
