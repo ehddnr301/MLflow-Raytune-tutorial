@@ -2,6 +2,7 @@ import mlflow
 import pandas as pd
 import xgboost as xgb
 import random
+from sklearn.linear_model import LogisticRegression
 
 from mlflow.tracking import MlflowClient
 from abc import ABC, abstractmethod
@@ -89,9 +90,10 @@ class InsuranceTuner(Tuner):
             "rmse": "min"
         }
 
-    def _log_experiments(self, config, metrics, xgb_model):
+    def _log_experiments(self, config, metrics):
         best_score = None
         mlflow.set_tracking_uri(POSTGRES_URL)
+        mlflow.set_experiment(EXP_NAME)
 
         client = MlflowClient()
         exp_id = client.get_experiment_by_name(EXP_NAME).experiment_id
@@ -106,13 +108,17 @@ class InsuranceTuner(Tuner):
         with mlflow.start_run(experiment_id=exp_id):
             mlflow.log_metrics(metrics)
             mlflow.log_params(config)
-
-            if not best_score or best_score > metrics[METRIC]:
-                print('log model')
-                mlflow.xgboost.log_model(
-                    xgb_model,
-                    artifact_path="model",
-                )
+            lr = LogisticRegression()
+            mlflow.sklearn.log_model(
+                lr,
+                artifact_path='model'
+            )
+            # if not best_score or best_score > metrics[METRIC]:
+            #     print('log model')
+            #     mlflow.xgboost.log_model(
+            #         xgb_model,
+            #         artifact_path="model",
+            #     )
 
     def _trainable(self, config):
         train_x, test_x, train_y, test_y = super()._split(0.2)
@@ -130,14 +136,14 @@ class InsuranceTuner(Tuner):
         return results['eval'], xgb_model
 
     def _run(self, config):
-        results, xgb_model = self._trainable(config)
+        # results, xgb_model = self._trainable(config)
 
         metrics = {
-            "mae": min(results["mae"]),
-            "rmse": min(results["rmse"]),
+            "mae": 0.2,
+            "rmse": 0.3,
         }
 
-        self._log_experiments(config, metrics, xgb_model)
+        self._log_experiments(config, metrics)
         tune.report(**metrics)
 
     def exec(self, tune_config=None, num_trials=15):
