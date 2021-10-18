@@ -18,7 +18,7 @@ SELECT_ALL_INSURANCE = """
         FROM insurance
     """
 
-POSTGRES_URL = 'postgresql://ehddnr:0000@localhost:5431/ehddnr'
+HOST_URL = 'http://localhost:5001'
 
 EXP_NAME = 'my_experiment143'
 
@@ -90,9 +90,9 @@ class InsuranceTuner(Tuner):
             "rmse": "min"
         }
 
-    def _log_experiments(self, config, metrics):
+    def _log_experiments(self, config, metrics, xgb_model):
         best_score = None
-        mlflow.set_tracking_uri(POSTGRES_URL)
+        mlflow.set_tracking_uri(HOST_URL)
         mlflow.set_experiment(EXP_NAME)
 
         client = MlflowClient()
@@ -108,17 +108,13 @@ class InsuranceTuner(Tuner):
         with mlflow.start_run(experiment_id=exp_id):
             mlflow.log_metrics(metrics)
             mlflow.log_params(config)
-            lr = LogisticRegression()
-            mlflow.sklearn.log_model(
-                lr,
-                artifact_path='model'
-            )
-            # if not best_score or best_score > metrics[METRIC]:
-            #     print('log model')
-            #     mlflow.xgboost.log_model(
-            #         xgb_model,
-            #         artifact_path="model",
-            #     )
+            
+            if not best_score or best_score > metrics[METRIC]:
+                print('log model')
+                mlflow.xgboost.log_model(
+                    xgb_model,
+                    artifact_path="model",
+                )
 
     def _trainable(self, config):
         train_x, test_x, train_y, test_y = super()._split(0.2)
@@ -136,14 +132,14 @@ class InsuranceTuner(Tuner):
         return results['eval'], xgb_model
 
     def _run(self, config):
-        # results, xgb_model = self._trainable(config)
+        results, xgb_model = self._trainable(config)
 
         metrics = {
-            "mae": 0.2,
-            "rmse": 0.3,
+            "mae": min(results["mae"]),
+            "rmse": min(results["rmse"]),
         }
 
-        self._log_experiments(config, metrics)
+        self._log_experiments(config, metrics, xgb_model)
         tune.report(**metrics)
 
     def exec(self, tune_config=None, num_trials=15):
@@ -166,7 +162,7 @@ class InsuranceTuner(Tuner):
         )
 
 if __name__ == '__main__':
-    mlflow.set_tracking_uri(POSTGRES_URL)
+    mlflow.set_tracking_uri(HOST_URL)
     mlflow.set_experiment(EXP_NAME)
 
     etl = ETL()

@@ -12,9 +12,16 @@
 
 ## mlflow dashboard
 
-- `mlflow server --backend-store-uri postgresql://ehddnr:0000@localhost:5431/ehddnr --default-artifact-root <실험저장 경로>`
-    - `<실험저장경로>` example : `C:\Users\TFG5076XG\Documents\ray_mlflow\mlruns`
-
+- windows
+    - `mlflow server --backend-store-uri postgresql://ehddnr:0000@localhost:5431/ehddnr --default-artifact-root /Users/TFG5076XG/Documents/ray_mlflow/models -p 5001`
+- mac
+    - `mlflow server --backend-store-uri postgresql://ehddnr:0000@localhost:5431/ehddnr --default-artifact-root $(pwd) -p 5001`
 ## execute
 
 - `python test.py`
+
+
+
+# docker
+
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 795988b012c2
