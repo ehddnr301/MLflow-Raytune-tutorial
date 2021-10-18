@@ -19,9 +19,3 @@
 ## execute
 
 - `python test.py`
-
-
-
-# docker
-
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 795988b012c2
